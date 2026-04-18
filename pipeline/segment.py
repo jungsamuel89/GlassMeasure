@@ -5,12 +5,18 @@ import types
 
 # Stub out triton before SAM3 tries to import it (not available on Windows/CPU)
 if "triton" not in sys.modules:
-    _triton_stub = types.ModuleType("triton")
-    _triton_stub.jit = types.ModuleType("triton.jit")
-    _triton_stub.language = types.ModuleType("triton.language")
-    sys.modules["triton"] = _triton_stub
-    sys.modules["triton.jit"] = _triton_stub.jit
-    sys.modules["triton.language"] = _triton_stub.language
+    # Create a permissive stub that returns itself for any attribute access
+    class _TritonStub(types.ModuleType):
+        def __getattr__(self, name):
+            return _TritonStub(name)
+        def __call__(self, *args, **kwargs):
+            def wrapper(fn):
+                return fn
+            return wrapper
+
+    _triton = _TritonStub("triton")
+    for submod in ["triton", "triton.jit", "triton.language", "triton.language.core"]:
+        sys.modules[submod] = _TritonStub(submod)
 
 import torch
 import numpy as np
