@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,47 +9,47 @@
 <body>
     <header>
         <h1>GlassMeasure</h1>
-        <p class="subtitle">Glass Surface Measurement mit SAM3 + LiDAR Depth</p>
+        <p class="subtitle">Glass Surface Measurement with SAM3 + LiDAR Depth</p>
     </header>
 
     <main>
         <section class="upload-section">
-            <h2>Dateien hochladen</h2>
+            <h2>Upload Files</h2>
             <form id="uploadForm">
                 <div class="file-inputs">
                     <div class="file-group">
-                        <label for="image">RGB Bild (.jpg)</label>
+                        <label for="image">RGB Image (.jpg)</label>
                         <input type="file" id="image" name="image" accept=".jpg,.jpeg,.png" required>
-                        <span class="file-name" id="image-name">Keine Datei</span>
+                        <span class="file-name" id="image-name">No file selected</span>
                     </div>
                     <div class="file-group">
                         <label for="depth">Depth Map (.png)</label>
                         <input type="file" id="depth" name="depth" accept=".png" required>
-                        <span class="file-name" id="depth-name">Keine Datei</span>
+                        <span class="file-name" id="depth-name">No file selected</span>
                     </div>
                     <div class="file-group">
                         <label for="intrinsics">Intrinsics (.json)</label>
                         <input type="file" id="intrinsics" name="intrinsics" accept=".json" required>
-                        <span class="file-name" id="intrinsics-name">Keine Datei</span>
+                        <span class="file-name" id="intrinsics-name">No file selected</span>
                     </div>
                 </div>
-                <button type="submit" id="submitBtn">Messen</button>
+                <button type="submit" id="submitBtn">Measure</button>
             </form>
         </section>
 
         <section class="result-section" id="resultSection" style="display:none;">
-            <h2>Ergebnis</h2>
+            <h2>Result</h2>
             <div class="result-content">
-                <img id="resultImage" src="" alt="Messergebnis">
+                <img id="resultImage" src="" alt="Measurement result">
                 <div class="result-summary" id="resultSummary"></div>
-                <button id="saveBtn" class="save-btn">Bild speichern</button>
+                <button id="saveBtn" class="save-btn">Save Image</button>
             </div>
         </section>
 
         <section class="table-section">
             <div class="table-header">
-                <h2>Messungen (Session)</h2>
-                <button id="clearBtn" class="clear-btn">Tabelle leeren</button>
+                <h2>Measurements (Session)</h2>
+                <button id="clearBtn" class="clear-btn">Clear Table</button>
                 <button id="exportBtn" class="export-btn">CSV Export</button>
             </div>
             <table id="historyTable">
@@ -57,12 +57,12 @@
                     <tr>
                         <th>#</th>
                         <th>Scan</th>
-                        <th>Glas Nr.</th>
-                        <th>Breite (cm)</th>
-                        <th>Höhe (cm)</th>
-                        <th>Fläche (m²)</th>
-                        <th>Konfidenz</th>
-                        <th>Zeit</th>
+                        <th>Glass No.</th>
+                        <th>Width (cm)</th>
+                        <th>Height (cm)</th>
+                        <th>Area (m²)</th>
+                        <th>Confidence</th>
+                        <th>Time</th>
                     </tr>
                 </thead>
                 <tbody id="historyBody">
@@ -72,7 +72,7 @@
 
         <div class="loading-overlay" id="loading" style="display:none;">
             <div class="spinner"></div>
-            <p>Pipeline läuft... Bitte warten.</p>
+            <p>Running pipeline... Please wait.</p>
         </div>
     </main>
 
@@ -81,7 +81,7 @@
         document.querySelectorAll('input[type="file"]').forEach(input => {
             input.addEventListener('change', () => {
                 const nameEl = document.getElementById(input.id + '-name');
-                nameEl.textContent = input.files[0]?.name || 'Keine Datei';
+                nameEl.textContent = input.files[0]?.name || 'No file selected';
             });
         });
 
@@ -110,7 +110,7 @@
 
                 // Summary
                 const summary = data.results.map(r =>
-                    `Glas #${r.glass_nr}: ${r.width_cm} × ${r.height_cm} cm (${r.area_m2} m²)`
+                    `Glass #${r.glass_nr}: ${r.width_cm} × ${r.height_cm} cm (${r.area_m2} m²)`
                 ).join('<br>');
                 document.getElementById('resultSummary').innerHTML = summary;
 
@@ -118,13 +118,13 @@
                 document.getElementById('saveBtn').onclick = () => {
                     const a = document.createElement('a');
                     a.href = '/result/' + data.result_id;
-                    a.download = 'messung_' + data.result_id + '.jpg';
+                    a.download = 'measurement_' + data.result_id + '.jpg';
                     a.click();
                 };
 
                 loadHistory();
             } catch (err) {
-                alert('Fehler: ' + err.message);
+                alert('Error: ' + err.message);
             } finally {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('submitBtn').disabled = false;
@@ -160,16 +160,16 @@
         document.getElementById('exportBtn').addEventListener('click', async () => {
             const resp = await fetch('/history');
             const rows = await resp.json();
-            if (!rows.length) { alert('Keine Daten.'); return; }
+            if (!rows.length) { alert('No data.'); return; }
 
-            let csv = 'Nr,Scan,Glas,Breite_cm,Hoehe_cm,Flaeche_m2,Konfidenz,Zeit\n';
+            let csv = 'No,Scan,Glass,Width_cm,Height_cm,Area_m2,Confidence,Time\n';
             rows.forEach((r, i) => {
                 csv += `${i+1},${r.scan},${r.glass_nr},${r.width_cm},${r.height_cm},${r.area_m2},${r.score},${r.timestamp}\n`;
             });
             const blob = new Blob([csv], { type: 'text/csv' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = 'messungen.csv';
+            a.download = 'measurements.csv';
             a.click();
         });
 

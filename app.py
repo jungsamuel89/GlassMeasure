@@ -55,7 +55,7 @@ def measure():
         intrinsics_file = request.files.get("intrinsics")
 
         if not all([image_file, depth_file, intrinsics_file]):
-            return jsonify({"error": "Bitte alle 3 Dateien hochladen."}), 400
+            return jsonify({"error": "Please upload all 3 files."}), 400
 
         run_id = str(uuid.uuid4())[:8]
         run_dir = UPLOAD_DIR / run_id
@@ -79,7 +79,7 @@ def measure():
         mask_results = segment_glass(pil_img)
 
         if not mask_results:
-            return jsonify({"error": "Keine Glasflächen erkannt."})
+            return jsonify({"error": "No glass surfaces detected."})
 
         masks = [r["mask"] for r in mask_results]
         scores = [r["score"] for r in mask_results]
@@ -137,7 +137,7 @@ def measure():
             results.append(row)
 
         if not results:
-            return jsonify({"error": "Messung fehlgeschlagen – keine gültigen Polygone."})
+            return jsonify({"error": "Measurement failed – no valid polygons extracted."})
 
         # Save result image
         result_path = str(run_dir / "result.jpg")
@@ -162,7 +162,7 @@ def measure():
 
     except Exception as e:
         traceback.print_exc()
-        return jsonify({"error": f"Pipeline-Fehler: {str(e)}"}), 500
+        return jsonify({"error": f"Pipeline error: {str(e)}"}), 500
 
 
 @app.route("/result/<result_id>")
