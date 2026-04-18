@@ -1,23 +1,5 @@
 """SAM3 segmentation with fine-tuned Exp4 weights."""
 
-import sys
-import types
-
-# Stub out triton before SAM3 tries to import it (not available on Windows/CPU)
-if "triton" not in sys.modules:
-    # Create a permissive stub that returns itself for any attribute access
-    class _TritonStub(types.ModuleType):
-        def __getattr__(self, name):
-            return _TritonStub(name)
-        def __call__(self, *args, **kwargs):
-            def wrapper(fn):
-                return fn
-            return wrapper
-
-    _triton = _TritonStub("triton")
-    for submod in ["triton", "triton.jit", "triton.language", "triton.language.core"]:
-        sys.modules[submod] = _TritonStub(submod)
-
 import torch
 import numpy as np
 from PIL import Image
@@ -33,12 +15,41 @@ PROMPT = "measurement glass area(s)"
 CONFIDENCE_THRESHOLD = 0.3
 
 
+def _stub_triton():
+    """Install a safe triton stub for Windows/CPU (SAM3 imports triton for CUDA kernels)."""
+    import sys
+    import types
+
+    if "triton" in sys.modules:
+        return
+
+    class _Stub(types.ModuleType):
+        """Returns a new stub for any attribute, but returns proper types for dunder attrs."""
+        def __getattr__(self, name):
+            if name.startswith("__") and name.endswith("__"):
+                raise AttributeError(name)
+            return _Stub(f"{self.__name__}.{name}")
+        def __call__(self, *a, **kw):
+            def passthrough(fn):
+                return fn
+            return passthrough
+
+    for name in [
+        "triton", "triton.jit", "triton.language", "triton.language.core",
+        "triton.runtime", "triton.compiler", "triton.backends",
+    ]:
+        sys.modules[name] = _Stub(name)
+
+
 def _load_model():
     """Load SAM3 model with fine-tuned exp4 weights (cached)."""
     global _model, _processor, _device
 
     if _model is not None:
         return _model, _processor, _device
+
+    # Stub triton before importing SAM3 (after torch is already loaded)
+    _stub_triton()
 
     _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[*] Loading SAM3 model on {_device} ...")
