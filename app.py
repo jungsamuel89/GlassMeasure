@@ -201,6 +201,18 @@ def main():
     print("  Press Ctrl+C to stop.")
     print()
 
+    # HuggingFace login (needed for gated SAM3 base model)
+    if os.environ.get("HF_TOKEN"):
+        try:
+            from huggingface_hub import login
+            login(token=os.environ["HF_TOKEN"], add_to_git_credential=False)
+        except Exception:
+            pass
+
+    # Patch SAM3 for CPU compatibility (hardcoded CUDA references)
+    from pipeline.patch_sam3 import patch_sam3
+    patch_sam3()
+
     # Pre-load model on startup
     print("[*] Pre-loading SAM3 model (first time may download ~5 GB) ...")
     try:

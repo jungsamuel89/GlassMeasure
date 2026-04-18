@@ -19,6 +19,8 @@ setup(
         "opencv-python>=4.8.0",
         "flask>=3.0.0",
         "einops",
+        "pycocotools",
+        "psutil",
         "sam3 @ git+https://github.com/facebookresearch/sam3.git",
     ],
     entry_points={
