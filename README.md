@@ -52,5 +52,4 @@ Uses [SAM3](https://github.com/facebookresearch/sam3) fine-tuned on glass surfac
 
 - Python 3.10+
 - ~8 GB RAM (CPU inference)
-- GPU optional but recommended (CUDA)
 - ~6 GB disk for model weights (cached in `~/.cache/glassmeasure/`)
