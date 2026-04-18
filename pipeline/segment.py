@@ -1,5 +1,17 @@
 """SAM3 segmentation with fine-tuned Exp4 weights."""
 
+import sys
+import types
+
+# Stub out triton before SAM3 tries to import it (not available on Windows/CPU)
+if "triton" not in sys.modules:
+    _triton_stub = types.ModuleType("triton")
+    _triton_stub.jit = types.ModuleType("triton.jit")
+    _triton_stub.language = types.ModuleType("triton.language")
+    sys.modules["triton"] = _triton_stub
+    sys.modules["triton.jit"] = _triton_stub.jit
+    sys.modules["triton.language"] = _triton_stub.language
+
 import torch
 import numpy as np
 from PIL import Image
