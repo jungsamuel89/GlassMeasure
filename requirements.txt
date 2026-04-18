@@ -1,3 +1,6 @@
+# CPU-only laptops: install PyTorch from the CPU wheel index *before* pip install -e .
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# The entries below then act as a version floor without pulling the CUDA build.
 torch>=2.1.0
 torchvision>=0.16.0
 huggingface_hub>=0.22.0

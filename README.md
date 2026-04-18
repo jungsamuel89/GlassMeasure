@@ -14,7 +14,10 @@ python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
 
-# 3. Install
+# 3a. CPU-only laptops: install the PyTorch CPU wheel FIRST
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# 3b. Install the rest
 pip install -e .
 
 # 4. Set HuggingFace token (for model download)

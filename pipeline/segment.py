@@ -94,6 +94,7 @@ import numpy as np
 from PIL import Image
 
 from .download_model import get_weights_path
+from .device import get_device, get_map_location, inference_context
 
 # Global model cache
 _model = None
@@ -111,22 +112,28 @@ def _load_model():
     if _model is not None:
         return _model, _processor, _device
 
-    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _device = get_device()
     print(f"[*] Loading SAM3 model on {_device} ...")
 
     from sam3 import build_sam3_image_model
     from sam3.model.sam3_image_processor import Sam3Processor
 
-    # Load base SAM3 from HuggingFace
-    _model = build_sam3_image_model(load_from_HF=True)
+    # Build base SAM3; pass device string so the builder skips model.cuda()
+    # when we're on CPU/MPS.
+    _model = build_sam3_image_model(load_from_HF=True, device=_device.type)
 
-    # Load fine-tuned weights (Exp4)
+    # Fine-tuned Exp4 weights: load onto CPU first, then move to target device.
     weights_path = get_weights_path()
-    checkpoint = torch.load(str(weights_path), map_location=_device, weights_only=False)
+    checkpoint = torch.load(
+        str(weights_path),
+        map_location=get_map_location(),
+        weights_only=False,
+    )
     _model.load_state_dict(checkpoint["model"], strict=False)
     _model = _model.to(_device).eval()
 
-    _processor = Sam3Processor(_model, resolution=1008, device=_device)
+    # Sam3Processor expects a string like "cuda"/"cpu"/"mps"
+    _processor = Sam3Processor(_model, resolution=1008, device=_device.type)
     _processor.set_confidence_threshold(CONFIDENCE_THRESHOLD)
 
     print("[OK] SAM3 model loaded successfully.")
@@ -141,13 +148,7 @@ def segment_glass(image: Image.Image) -> list[dict]:
     """
     model, processor, device = _load_model()
 
-    # CPU: no autocast needed; CUDA: use bfloat16
-    if device.type == "cuda":
-        ctx = torch.amp.autocast("cuda", dtype=torch.bfloat16)
-    else:
-        ctx = torch.no_grad()
-
-    with ctx:
+    with inference_context():
         state = processor.set_image(image)
         output = processor.set_text_prompt(PROMPT, state)
 
