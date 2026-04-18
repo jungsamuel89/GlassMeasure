@@ -19,26 +19,32 @@ def _stub_triton():
     """Install a safe triton stub for Windows/CPU (SAM3 imports triton for CUDA kernels)."""
     import sys
     import types
+    import importlib
 
     if "triton" in sys.modules:
         return
 
-    class _Stub(types.ModuleType):
-        """Returns a new stub for any attribute, but returns proper types for dunder attrs."""
-        def __getattr__(self, name):
-            if name.startswith("__") and name.endswith("__"):
-                raise AttributeError(name)
-            return _Stub(f"{self.__name__}.{name}")
-        def __call__(self, *a, **kw):
-            def passthrough(fn):
-                return fn
-            return passthrough
+    class _TritonFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+        """Intercept any 'triton.*' import and return a dummy module."""
 
-    for name in [
-        "triton", "triton.jit", "triton.language", "triton.language.core",
-        "triton.runtime", "triton.compiler", "triton.backends",
-    ]:
-        sys.modules[name] = _Stub(name)
+        def find_module(self, fullname, path=None):
+            if fullname == "triton" or fullname.startswith("triton."):
+                return self
+            return None
+
+        def load_module(self, fullname):
+            if fullname in sys.modules:
+                return sys.modules[fullname]
+            mod = types.ModuleType(fullname)
+            mod.__loader__ = self
+            mod.__file__ = f"<triton-stub:{fullname}>"
+            mod.__path__ = []  # make it a package so sub-imports work
+            mod.__package__ = fullname
+            mod.__spec__ = None
+            sys.modules[fullname] = mod
+            return mod
+
+    sys.meta_path.insert(0, _TritonFinder())
 
 
 def _load_model():
