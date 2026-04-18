@@ -1,9 +1,8 @@
-"""SAM3 segmentation with fine-tuned weights."""
+"""SAM3 segmentation with fine-tuned Exp4 weights."""
 
 import torch
 import numpy as np
 from PIL import Image
-from transformers import AutoProcessor, AutoModelForMaskGeneration
 
 from .download_model import get_weights_path
 
@@ -13,8 +12,7 @@ _processor = None
 _device = None
 
 PROMPT = "measurement glass area(s)"
-CONFIDENCE_THRESHOLD = 0.5
-MIN_MASK_AREA = 2500
+CONFIDENCE_THRESHOLD = 0.3
 
 
 def _load_model():
@@ -24,33 +22,25 @@ def _load_model():
     if _model is not None:
         return _model, _processor, _device
 
-    _device = "cuda" if torch.cuda.is_available() else "cpu"
+    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[*] Loading SAM3 model on {_device} ...")
 
-    _processor = AutoProcessor.from_pretrained(
-        "facebook/sam2.1-hiera-large",
-        trust_remote_code=True,
-    )
-    _model = AutoModelForMaskGeneration.from_pretrained(
-        "facebook/sam2.1-hiera-large",
-        trust_remote_code=True,
-    )
+    from sam3 import build_sam3_image_model
+    from sam3.model.sam3_image_processor import Sam3Processor
 
-    # Load fine-tuned weights
+    # Load base SAM3 from HuggingFace
+    _model = build_sam3_image_model(load_from_HF=True)
+
+    # Load fine-tuned weights (Exp4)
     weights_path = get_weights_path()
     checkpoint = torch.load(str(weights_path), map_location=_device, weights_only=False)
+    _model.load_state_dict(checkpoint["model"], strict=False)
+    _model = _model.to(_device).eval()
 
-    if "model_state_dict" in checkpoint:
-        state_dict = checkpoint["model_state_dict"]
-    else:
-        state_dict = checkpoint
+    _processor = Sam3Processor(_model, resolution=1008, device=_device)
+    _processor.set_confidence_threshold(CONFIDENCE_THRESHOLD)
 
-    # Load with strict=False to handle partial fine-tuning
-    _model.load_state_dict(state_dict, strict=False)
-    _model.to(_device)
-    _model.eval()
-
-    print("[OK] Model loaded successfully.")
+    print("[OK] SAM3 model loaded successfully.")
     return _model, _processor, _device
 
 
@@ -62,49 +52,30 @@ def segment_glass(image: Image.Image) -> list[dict]:
     """
     model, processor, device = _load_model()
 
-    inputs = processor(
-        images=image,
-        text=PROMPT,
-        return_tensors="pt",
-    ).to(device)
+    # Use autocast for efficiency (works on both CPU and CUDA)
+    autocast_device = "cuda" if device.type == "cuda" else "cpu"
+    dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
 
-    with torch.no_grad():
-        outputs = model(**inputs)
+    with torch.amp.autocast(autocast_device, dtype=dtype):
+        state = processor.set_image(image)
+        output = processor.set_text_prompt(PROMPT, state)
 
-    # Post-process masks
-    target_size = [(image.height, image.width)]
-    masks_output = processor.post_process_masks(
-        outputs.pred_masks,
-        inputs["original_sizes"] if "original_sizes" in inputs else target_size,
-        target_size,
-    )
-
-    if isinstance(masks_output, list):
-        masks = masks_output[0]  # first (only) image
-    else:
-        masks = masks_output
-
-    scores = outputs.iou_scores[0] if hasattr(outputs, "iou_scores") else None
-    if scores is None and hasattr(outputs, "pred_scores"):
-        scores = outputs.pred_scores[0]
+    raw_masks = output.get("masks", [])
+    raw_scores = output.get("scores", [])
+    raw_masks = list(raw_masks) if raw_masks is not None and len(raw_masks) > 0 else []
+    raw_scores = list(raw_scores) if raw_scores is not None and len(raw_scores) > 0 else []
 
     results = []
-    if masks.dim() == 4:
-        masks = masks.squeeze(0)  # remove batch dim
+    for i, m in enumerate(raw_masks):
+        # Convert to numpy boolean mask
+        if hasattr(m, "cpu"):
+            m_np = m.cpu().numpy().squeeze()
+        else:
+            m_np = np.array(m).squeeze()
 
-    for i in range(masks.shape[0]):
-        mask = masks[i].cpu()
-        if mask.dim() == 3:
-            mask = mask[0]  # take first channel
-        mask_np = mask.numpy() > 0.5
+        mask_bool = m_np > 0.5
+        score = float(raw_scores[i]) if i < len(raw_scores) else 0.0
 
-        score = float(scores[i].max()) if scores is not None else 1.0
-
-        if score < CONFIDENCE_THRESHOLD:
-            continue
-        if mask_np.sum() < MIN_MASK_AREA:
-            continue
-
-        results.append({"mask": mask_np, "score": score})
+        results.append({"mask": mask_bool, "score": score})
 
     return results

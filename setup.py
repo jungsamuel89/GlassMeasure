@@ -11,7 +11,6 @@ setup(
     install_requires=[
         "torch>=2.1.0",
         "torchvision>=0.16.0",
-        "transformers>=4.40.0",
         "huggingface_hub>=0.22.0",
         "Pillow>=10.0.0",
         "matplotlib>=3.7.0",
@@ -19,6 +18,8 @@ setup(
         "scipy>=1.11.0",
         "opencv-python>=4.8.0",
         "flask>=3.0.0",
+        "einops",
+        "sam3 @ git+https://github.com/facebookresearch/sam3.git",
     ],
     entry_points={
         "console_scripts": [

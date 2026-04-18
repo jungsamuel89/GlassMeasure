@@ -1,166 +1,227 @@
-"""3D measurement of glass surfaces using depth map + camera intrinsics."""
+"""3D measurement of glass surfaces using depth map + camera intrinsics.
+
+Adapted from 04_pipeline/calculate_glass_area.py in BachelorThesis_GlassAssessment.
+"""
 
 import json
 import numpy as np
-from pathlib import Path
+from PIL import Image
 
 
-PATCH_SIZE = 20  # px for depth sampling
+# ── Load depth map ───────────────────────────────────────────────────────────
 
-
-def load_intrinsics(intrinsics_path: str) -> dict:
-    """Load camera intrinsics from 3D Scanner App JSON export."""
-    with open(intrinsics_path, "r") as f:
-        data = json.load(f)
-
-    # Handle different JSON formats
-    if "intrinsicMatrix" in data:
-        m = data["intrinsicMatrix"]
-        # Flat [fx, 0, cx, 0, fy, cy, 0, 0, 1] or nested
-        if isinstance(m, list) and len(m) == 9:
-            fx, _, cx, _, fy, cy = m[0], m[1], m[2], m[3], m[4], m[5]
-        elif isinstance(m, list) and len(m) == 3:
-            fx, _, cx = m[0]
-            _, fy, cy = m[1]
-        else:
-            fx, fy, cx, cy = m.get("fx", m[0]), m.get("fy", m[4]), m.get("cx", m[2]), m.get("cy", m[5])
-    elif "fx" in data:
-        fx = data["fx"]
-        fy = data["fy"]
-        cx = data["cx"]
-        cy = data["cy"]
-    else:
-        raise ValueError(f"Unknown intrinsics format. Keys: {list(data.keys())}")
-
-    return {"fx": float(fx), "fy": float(fy), "cx": float(cx), "cy": float(cy)}
-
-
-def load_depth_map(depth_path: str) -> np.ndarray:
+def load_depth(depth_path: str, img_w: int, img_h: int) -> np.ndarray:
     """
     Load 16-bit depth map PNG (values in mm) and convert to meters.
-    Rotates 90deg CW to match EXIF-corrected RGB orientation.
+    Rotates 90° CW to match EXIF-corrected RGB orientation.
+    Scales to match image dimensions if needed.
     """
-    import cv2
-    depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-    if depth is None:
-        raise FileNotFoundError(f"Could not read depth map: {depth_path}")
+    depth_img = Image.open(depth_path)
+    depth_arr = np.array(depth_img, dtype=np.float32)
 
     # Rotate 90° clockwise to match RGB orientation
-    depth = np.rot90(depth, k=-1)
+    depth_arr = np.rot90(depth_arr, k=-1)
 
-    # Convert mm to meters
-    depth_m = depth.astype(np.float64) / 1000.0
-    return depth_m
+    # 16-bit values are in millimeters -> meters
+    depth_meters = depth_arr / 1000.0
+
+    # Scale to image size if needed
+    rotated_w, rotated_h = depth_arr.shape[1], depth_arr.shape[0]
+    if (rotated_w, rotated_h) != (img_w, img_h):
+        depth_pil = Image.fromarray(depth_arr.astype(np.uint16))
+        depth_pil = depth_pil.resize((img_w, img_h), Image.BILINEAR)
+        depth_meters = np.array(depth_pil, dtype=np.float32) / 1000.0
+
+    return depth_meters
 
 
-def sample_frame_depth(
-    corner: np.ndarray,
-    mask: np.ndarray,
-    depth_map: np.ndarray,
-    center: np.ndarray,
-) -> float:
+# ── Load camera intrinsics ───────────────────────────────────────────────────
+
+def load_intrinsics(frame_json_path: str):
     """
-    Sample depth at a corner point from the window frame (not the glass).
-
-    Places a patch away from the glass center, uses only non-glass pixels,
-    and returns the minimum (nearest/frame surface) depth.
+    Load fx, fy, cx, cy from the 3D Scanner App JSON.
+    Format: {"intrinsics": [fx, 0, cx, 0, fy, cy, 0, 0, 1]}
     """
-    h, w = depth_map.shape
-    cx, cy = int(corner[0]), int(corner[1])
-    mcx, mcy = int(center[0]), int(center[1])
-
-    # Direction away from glass center
-    dx = cx - mcx
-    dy = cy - mcy
-    norm = max(np.sqrt(dx**2 + dy**2), 1e-6)
-    dx, dy = dx / norm, dy / norm
-
-    # Place patch center outside the glass
-    offset = PATCH_SIZE
-    px = int(cx + dx * offset)
-    py = int(cy + dy * offset)
-
-    # Clamp to image bounds
-    x1 = max(0, px - PATCH_SIZE // 2)
-    x2 = min(w, px + PATCH_SIZE // 2)
-    y1 = max(0, py - PATCH_SIZE // 2)
-    y2 = min(h, py + PATCH_SIZE // 2)
-
-    patch_depth = depth_map[y1:y2, x1:x2]
-    patch_mask = mask[y1:y2, x1:x2]
-
-    # Only use non-glass pixels
-    valid = (~patch_mask) & (patch_depth > 0.01)
-    if valid.sum() == 0:
-        # Fallback: use all non-zero depth
-        valid = patch_depth > 0.01
-    if valid.sum() == 0:
-        return float(depth_map[max(0, min(cy, h-1)), max(0, min(cx, w-1))]) or 1.0
-
-    return float(np.min(patch_depth[valid]))
+    with open(frame_json_path) as f:
+        meta = json.load(f)
+    intr = meta["intrinsics"]
+    fx, fy = intr[0], intr[4]
+    cx, cy = intr[2], intr[5]
+    return fx, fy, cx, cy
 
 
-def backproject_to_3d(u: float, v: float, z: float, intrinsics: dict) -> np.ndarray:
-    """Backproject pixel (u,v) at depth z to 3D point using pinhole model."""
-    fx, fy = intrinsics["fx"], intrinsics["fy"]
-    cx, cy = intrinsics["cx"], intrinsics["cy"]
-    x = (u - cx) * z / fx
-    y = (v - cy) * z / fy
-    return np.array([x, y, z])
+# ── Backprojection ───────────────────────────────────────────────────────────
+
+def backproject(u: float, v: float, z: float,
+                fx: float, fy: float, cx: float, cy: float) -> np.ndarray:
+    """Backproject a pixel (u, v) at depth z into 3D camera coordinates."""
+    X = (u - cx) * z / fx
+    Y = (v - cy) * z / fy
+    return np.array([X, Y, z])
 
 
-def measure_glass(
-    corners: np.ndarray,
-    mask: np.ndarray,
-    depth_path: str,
-    intrinsics_path: str,
-) -> dict:
+# ── Corner ordering ─────────────────────────────────────────────────────────
+
+def order_corners(polygon_pts: list) -> dict:
     """
-    Measure a glass surface given its 4 ordered corners (TL, TR, BR, BL),
-    binary mask, depth map path, and intrinsics path.
-
-    Returns dict with width_m, height_m, area_m2, width_cm, height_cm, corners_3d.
+    Order polygon corners as TL, TR, BR, BL using sum/difference heuristic.
     """
-    intrinsics = load_intrinsics(intrinsics_path)
-    depth_map = load_depth_map(depth_path)
+    pts = np.array(polygon_pts, dtype=np.float64)
+    s = pts[:, 0] + pts[:, 1]
+    d = pts[:, 0] - pts[:, 1]
+    return {
+        "TL": pts[np.argmin(s)].copy(),
+        "TR": pts[np.argmax(d)].copy(),
+        "BR": pts[np.argmax(s)].copy(),
+        "BL": pts[np.argmin(d)].copy(),
+    }
 
-    # Resize depth to match mask if needed
-    if depth_map.shape != mask.shape:
-        import cv2
-        depth_map = cv2.resize(depth_map, (mask.shape[1], mask.shape[0]),
-                               interpolation=cv2.INTER_NEAREST)
 
-    # Glass center
-    center = corners.mean(axis=0)
+# ── Depth sampling ──────────────────────────────────────────────────────────
 
-    # Sample frame depth at each corner and backproject to 3D
-    points_3d = []
-    for corner in corners:
-        z = sample_frame_depth(corner, mask, depth_map, center)
-        p3d = backproject_to_3d(float(corner[0]), float(corner[1]), z, intrinsics)
-        points_3d.append(p3d)
+def _corner_sign(corner_name):
+    """Direction signs (du, dv) for sampling away from the glass interior."""
+    return {
+        "TL": (-1, -1),
+        "TR": (+1, -1),
+        "BR": (+1, +1),
+        "BL": (-1, +1),
+    }[corner_name]
 
-    p3d = np.array(points_3d)  # shape (4, 3), order: TL, TR, BR, BL
 
-    # Compute side lengths
-    width_top = np.linalg.norm(p3d[1] - p3d[0])
-    width_bot = np.linalg.norm(p3d[2] - p3d[3])
-    height_left = np.linalg.norm(p3d[3] - p3d[0])
-    height_right = np.linalg.norm(p3d[2] - p3d[1])
+def _sample_depth_near(u, v, depth, radius=8):
+    """Fallback: median depth in a neighborhood."""
+    h, w = depth.shape
+    v0, v1 = max(0, v - radius), min(h, v + radius + 1)
+    u0, u1 = max(0, u - radius), min(w, u + radius + 1)
+    patch = depth[v0:v1, u0:u1]
+    valid = patch[patch > 0.1]
+    return float(np.median(valid)) if len(valid) > 0 else 0.0
 
-    width_m = (width_top + width_bot) / 2
-    height_m = (height_left + height_right) / 2
-    area_m2 = width_m * height_m
+
+def sample_frame_depth(corners, depth, mask, patch_size=20):
+    """
+    Sample frame depth at each corner: 20×20 px square placed away from glass center.
+    Only non-glass pixels are used. Returns minimum (nearest/frame surface) depth.
+    """
+    img_h, img_w = depth.shape
+    result = {}
+
+    for corner_name in ["TL", "TR", "BR", "BL"]:
+        cu, cv = corners[corner_name].astype(float)
+        cu_i, cv_i = int(round(cu)), int(round(cv))
+        du_sign, dv_sign = _corner_sign(corner_name)
+
+        # Square position: away from the glass center
+        u0 = cu_i if du_sign > 0 else cu_i - patch_size
+        v0 = cv_i if dv_sign > 0 else cv_i - patch_size
+
+        # Clip to image boundaries
+        u0 = max(u0, 0)
+        v0 = max(v0, 0)
+        u1 = min(u0 + patch_size, img_w)
+        v1 = min(v0 + patch_size, img_h)
+
+        patch_depth = depth[v0:v1, u0:u1].copy()
+        patch_mask = mask[v0:v1, u0:u1]
+        patch_depth[patch_mask] = 0  # exclude glass pixels
+
+        z_valid = patch_depth[patch_depth > 0.1]
+
+        if len(z_valid) == 0:
+            result[corner_name] = _sample_depth_near(cu_i, cv_i, depth, radius=15)
+        else:
+            result[corner_name] = float(np.min(z_valid))
+
+    return result
+
+
+# ── Side length calculation ─────────────────────────────────────────────────
+
+def calculate_side_lengths(polygon_pts, mask, depth, fx, fy, cx, cy):
+    """
+    Calculate 4 side lengths of the window in meters via 3D backprojection.
+    """
+    corners = order_corners(polygon_pts)
+    depth_at = sample_frame_depth(corners, depth, mask, patch_size=20)
+
+    pts_3d = {}
+    for name, corner_val in corners.items():
+        u, v = corner_val
+        z = depth_at.get(name, 0.0)
+        if z > 0.1:
+            pts_3d[name] = backproject(u, v, z, fx, fy, cx, cy)
+        else:
+            pts_3d[name] = None
+
+    def side_len(A, B):
+        if A is None or B is None:
+            return None
+        return float(np.linalg.norm(A - B))
+
+    w_top = side_len(pts_3d.get("TL"), pts_3d.get("TR"))
+    w_bottom = side_len(pts_3d.get("BL"), pts_3d.get("BR"))
+    h_left = side_len(pts_3d.get("TL"), pts_3d.get("BL"))
+    h_right = side_len(pts_3d.get("TR"), pts_3d.get("BR"))
+
+    def safe_mean(*vals):
+        v = [x for x in vals if x is not None]
+        return round(float(np.mean(v)), 4) if v else None
+
+    width_m = safe_mean(w_top, w_bottom)
+    height_m = safe_mean(h_left, h_right)
 
     return {
-        "width_m": round(float(width_m), 4),
-        "height_m": round(float(height_m), 4),
-        "area_m2": round(float(area_m2), 4),
-        "width_cm": round(float(width_m * 100), 1),
-        "height_cm": round(float(height_m * 100), 1),
-        "width_top_m": round(float(width_top), 4),
-        "width_bottom_m": round(float(width_bot), 4),
-        "height_left_m": round(float(height_left), 4),
-        "height_right_m": round(float(height_right), 4),
-        "corners_3d": p3d.tolist(),
+        "corners_px": {k: v.tolist() for k, v in corners.items()},
+        "corners_3d_m": {k: v.tolist() if v is not None else None
+                         for k, v in pts_3d.items()},
+        "depth_at_corners_m": {k: round(z, 4) for k, z in depth_at.items()},
+        "width_top_m": round(w_top, 4) if w_top else None,
+        "width_bottom_m": round(w_bottom, 4) if w_bottom else None,
+        "height_left_m": round(h_left, 4) if h_left else None,
+        "height_right_m": round(h_right, 4) if h_right else None,
+        "width_m": width_m,
+        "height_m": height_m,
+    }
+
+
+# ── Main area calculation ───────────────────────────────────────────────────
+
+def calculate_area(polygon_pts, mask, depth, fx, fy, cx, cy):
+    """
+    Calculate glass area via 3D side lengths.
+    Returns dict with area_m2, width/height, and sides sub-dict.
+    """
+    # Depth statistics within mask
+    v_coords, u_coords = np.where(mask)
+    z_values = depth[v_coords, u_coords]
+    valid = z_values > 0.1
+    z_valid = z_values[valid]
+
+    if len(z_valid) == 0:
+        return {
+            "area_m2": 0, "mean_depth_m": 0,
+            "pixel_count": 0, "valid_pixels": 0,
+            "sides": {},
+        }
+
+    mean_depth = float(z_valid.mean())
+
+    sides = calculate_side_lengths(polygon_pts, mask, depth, fx, fy, cx, cy)
+    width_m = sides.get("width_m")
+    height_m = sides.get("height_m")
+
+    total_area = (width_m * height_m) if (width_m and height_m) else 0.0
+
+    return {
+        "area_m2": round(total_area, 4),
+        "area_cm2": round(total_area * 10000, 1),
+        "mean_depth_m": round(mean_depth, 3),
+        "width_m": width_m,
+        "height_m": height_m,
+        "width_cm": round(width_m * 100, 1) if width_m else None,
+        "height_cm": round(height_m * 100, 1) if height_m else None,
+        "pixel_count": len(z_values),
+        "valid_pixels": len(z_valid),
+        "sides": sides,
     }

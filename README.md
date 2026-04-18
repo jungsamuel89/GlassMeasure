@@ -2,8 +2,6 @@
 
 Local web tool for measuring glass surfaces using fine-tuned SAM3 + LiDAR depth maps.
 
-Segments glass areas in RGB images, extracts corner polygons, backprojects to 3D using camera intrinsics and depth data, and computes real-world dimensions (width, height, area).
-
 ## Quick Start
 
 ```bash
@@ -34,12 +32,12 @@ The web interface opens at `http://127.0.0.1:5000`.
 1. Upload 3 files from a 3D Scanner App LiDAR scan:
    - **RGB Image** (.jpg) – the photo
    - **Depth Map** (.png) – 16-bit depth in mm
-   - **Intrinsics** (.json) – camera parameters
+   - **Intrinsics** (.json) – camera parameters (`{"intrinsics": [fx, 0, cx, 0, fy, cy, 0, 0, 1]}`)
 
 2. Click **Messen** – the pipeline runs:
-   - SAM3 segments glass surfaces
-   - Contours → 4-corner polygons
-   - Depth sampling at frame edges
+   - SAM3 segments glass surfaces (prompt: "measurement glass area(s)")
+   - Suzuki-Abe contour detection + Douglas-Peucker → 4-corner polygons
+   - Depth sampling at frame edges (20×20 px patches)
    - 3D backprojection → real-world dimensions
 
 3. Results appear as annotated image + measurements table.
@@ -48,7 +46,7 @@ The web interface opens at `http://127.0.0.1:5000`.
 
 ## Model
 
-Uses [SAM 2.1 Hiera Large](https://huggingface.co/facebook/sam2.1-hiera-large) fine-tuned on glass surfaces (Experiment 4, prompt: "measurement glass area(s)"). Weights (~5 GB) are downloaded automatically on first run from [HuggingFace](https://huggingface.co/jungsamu89/glass-sam3-finetuned).
+Uses [SAM3](https://github.com/facebookresearch/sam3) fine-tuned on glass surfaces (Experiment 4). Weights (~5 GB) are downloaded automatically on first run from [HuggingFace](https://huggingface.co/jungsamu89/glass-sam3-finetuned).
 
 ## Requirements
 

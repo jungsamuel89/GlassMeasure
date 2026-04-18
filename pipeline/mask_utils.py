@@ -1,64 +1,65 @@
-"""Mask-to-polygon conversion using contour detection."""
+"""Mask-to-polygon conversion (Suzuki-Abe + Douglas-Peucker)."""
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw
 
 
-def mask_to_polygon(mask: np.ndarray, epsilon_ratio: float = 0.02) -> np.ndarray | None:
+def mask_to_polygon(mask: np.ndarray,
+                    epsilon_factors=(0.01, 0.02, 0.03, 0.05, 0.08)) -> dict:
     """
-    Convert binary mask to a simplified polygon (ideally 4 corners).
+    Convert a SAM mask (H, W) into a polygon dict.
 
-    Args:
-        mask: H×W boolean array
-        epsilon_ratio: Douglas-Peucker simplification ratio
+    Algorithm:
+      1. Suzuki-Abe contour detection (cv2.findContours)
+      2. Douglas-Peucker simplification (cv2.approxPolyDP)
+         -> epsilon is gradually increased until >= 4 points are found
+      3. Fallback: bounding rectangle if DP does not yield 4 points
 
-    Returns:
-        Nx2 array of (x, y) corner coordinates, or None if no valid contour
+    Returns {"type": "polygon", "points": [[x, y], ...]}
     """
-    mask_uint8 = (mask.astype(np.uint8)) * 255
-    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    binary = (mask > 0.5).astype(np.uint8) * 255
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
-        return None
+        return {"type": "polygon", "points": []}
 
-    # Largest contour
     contour = max(contours, key=cv2.contourArea)
-    perimeter = cv2.arcLength(contour, True)
-    approx = cv2.approxPolyDP(contour, epsilon_ratio * perimeter, True)
+    arc_len = cv2.arcLength(contour, True)
 
-    points = approx.reshape(-1, 2)
+    approx = None
+    for factor in epsilon_factors:
+        approx = cv2.approxPolyDP(contour, factor * arc_len, True)
+        if len(approx) >= 4:
+            break
 
-    if len(points) < 4:
-        # Fall back to bounding rect corners
-        rect = cv2.minAreaRect(contour)
-        box = cv2.boxPoints(rect)
-        points = box.astype(int)
+    if approx is None or len(approx) < 4:
+        x, y, w, h = cv2.boundingRect(contour)
+        points = [[int(x), int(y)], [int(x + w), int(y)],
+                  [int(x + w), int(y + h)], [int(x), int(y + h)]]
+    else:
+        squeezed = approx.squeeze()
+        if squeezed.ndim == 1:
+            squeezed = squeezed.reshape(1, 2)
+        points = squeezed.tolist()
 
-    return points
+    return {"type": "polygon", "points": points}
 
 
-def order_corners(points: np.ndarray) -> np.ndarray:
-    """
-    Order points as: top-left, top-right, bottom-right, bottom-left.
+def masks_to_polygon_dicts(masks: list) -> list[dict]:
+    """Convert all SAM masks into a list of polygon dicts."""
+    results = []
+    for i, mask in enumerate(masks):
+        poly = mask_to_polygon(mask)
+        results.append(poly)
+    return results
 
-    Uses sum (x+y) for TL/BR and difference (y-x) for TR/BL.
-    """
-    if len(points) > 4:
-        # Use convex hull and pick 4 extreme points
-        hull = cv2.convexHull(points)
-        hull = hull.reshape(-1, 2)
-        rect = cv2.minAreaRect(hull)
-        box = cv2.boxPoints(rect)
-        points = box.astype(int)
 
-    pts = points.astype(np.float32)
-    s = pts.sum(axis=1)
-    d = np.diff(pts, axis=1).flatten()
-
-    ordered = np.zeros((4, 2), dtype=np.float32)
-    ordered[0] = pts[np.argmin(s)]   # top-left
-    ordered[1] = pts[np.argmin(d)]   # top-right
-    ordered[2] = pts[np.argmax(s)]   # bottom-right
-    ordered[3] = pts[np.argmax(d)]   # bottom-left
-
-    return ordered
+def polygon_to_binary_mask(polygon_dict: dict, img_w: int, img_h: int) -> np.ndarray:
+    """Convert a polygon dict into a binary NumPy mask (bool, H x W)."""
+    points = polygon_dict["points"]
+    poly_img = Image.new("L", (img_w, img_h), 0)
+    draw = ImageDraw.Draw(poly_img)
+    flat_pts = [(p[0], p[1]) for p in points]
+    draw.polygon(flat_pts, fill=255)
+    return np.array(poly_img) > 0
