@@ -4,12 +4,14 @@ Local web tool for measuring glass surfaces using fine-tuned SAM3 + LiDAR depth 
 
 ## Quick Start
 
+> **Python 3.10–3.12 recommended** (tested with 3.10.11). Python 3.14 is **not supported** — several pinned packages do not yet ship wheels for it and will fail to build.
+
 ```bash
 # 1. Clone
 git clone https://github.com/jungsamuel89/GlassMeasure.git
 cd GlassMeasure
 
-# 2. Create environment (Python 3.10+)
+# 2. Create environment (Python 3.10–3.12)
 python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
@@ -17,8 +19,11 @@ venv\Scripts\activate        # Windows
 # 3a. CPU-only laptops: install the PyTorch CPU wheel FIRST
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# 3b. Install the rest
-pip install -e .
+# 3b. Install pinned dependencies (exact versions from requirements.txt)
+pip install -r requirements.txt
+
+# 3c. Install the GlassMeasure package itself (without re-resolving deps)
+pip install -e . --no-deps
 
 # 4. Set HuggingFace token (for model download)
 set HF_TOKEN=your_token_here          # Windows
@@ -53,6 +58,6 @@ Uses [SAM3](https://github.com/facebookresearch/sam3) fine-tuned on glass surfac
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10–3.12 (tested with 3.10.11; Python 3.14 is not supported)
 - ~8 GB RAM (CPU inference)
 - ~6 GB disk for model weights (cached in `~/.cache/glassmeasure/`)
