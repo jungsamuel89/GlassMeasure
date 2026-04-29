@@ -51,7 +51,7 @@ pycocotools==2.0.11
 Pygments==2.20.0
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
-pywin32==311
+pywin32==311 ; sys_platform == 'win32'
 PyYAML==6.0.3
 regex==2026.4.4
 rich==15.0.0

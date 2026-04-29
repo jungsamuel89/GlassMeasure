@@ -16,8 +16,8 @@ python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
 
-# 3a. CPU-only laptops: install the PyTorch CPU wheel FIRST
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# 3a. CPU-only laptops: install the pinned PyTorch CPU wheels FIRST
+pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cpu
 
 # 3b. Install pinned dependencies (exact versions from requirements.txt)
 pip install -r requirements.txt
