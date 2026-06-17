@@ -6,4 +6,8 @@ build/
 .env
 *.pt
 *.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.log
 .cache/

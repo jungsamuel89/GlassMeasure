@@ -1,35 +1,31 @@
 # GlassMeasure
 
-Local web tool for measuring glass surfaces using fine-tuned SAM3 + LiDAR depth maps.
+Local web tool for measuring glass surfaces from RGB images and LiDAR depth maps using a fine-tuned SAM-based segmentation pipeline.
+
+## What It Shows
+
+- Applied computer vision workflow for real-world measurements
+- Flask-based local web interface for scan upload and CSV export
+- RGB + 16-bit depth map processing
+- Contour extraction, polygon fitting, depth sampling, and 3D backprojection
+- Model download and local inference setup for reproducible experiments
 
 ## Quick Start
 
-> **Python 3.10–3.12 recommended** (tested with 3.10.11). Python 3.14 is **not supported** — several pinned packages do not yet ship wheels for it and will fail to build.
+Python 3.10-3.12 is recommended. Python 3.14 is not supported because several pinned packages do not yet ship compatible wheels.
 
-```bash
-# 1. Clone
+```powershell
 git clone https://github.com/jungsamuel89/GlassMeasure.git
 cd GlassMeasure
 
-# 2. Create environment (Python 3.10–3.12)
 python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
+.\venv\Scripts\activate
 
-# 3a. CPU-only laptops: install the pinned PyTorch CPU wheels FIRST
 pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cpu
-
-# 3b. Install pinned dependencies (exact versions from requirements.txt)
 pip install -r requirements.txt
-
-# 3c. Install the GlassMeasure package itself (without re-resolving deps)
 pip install -e . --no-deps
 
-# 4. Set HuggingFace token (for model download)
-set HF_TOKEN=your_token_here          # Windows
-# export HF_TOKEN=your_token_here     # macOS/Linux
-
-# 5. Run
+$env:HF_TOKEN="your_token_here"
 samu
 ```
 
@@ -37,27 +33,24 @@ The web interface opens at `http://127.0.0.1:5000`.
 
 ## Usage
 
-1. Upload 3 files from a 3D Scanner App LiDAR scan:
-   - **RGB Image** (.jpg) – the photo
-   - **Depth Map** (.png) – 16-bit depth in mm
-   - **Intrinsics** (.json) – camera parameters (`{"intrinsics": [fx, 0, cx, 0, fy, cy, 0, 0, 1]}`)
+Upload three files from a LiDAR scan:
 
-2. Click **Messen** – the pipeline runs:
-   - SAM3 segments glass surfaces (prompt: "measurement glass area(s)")
-   - Suzuki-Abe contour detection + Douglas-Peucker → 4-corner polygons
-   - Depth sampling at frame edges (20×20 px patches)
-   - 3D backprojection → real-world dimensions
+- RGB image (`.jpg`)
+- 16-bit depth map in millimeters (`.png`)
+- Camera intrinsics (`.json`)
 
-3. Results appear as annotated image + measurements table.
-
-4. **CSV Export** downloads all session measurements.
+The pipeline segments glass areas, extracts contours, fits 4-corner polygons, samples depth around frame edges, backprojects points into 3D space, and exports the resulting measurements.
 
 ## Model
 
-Uses [SAM3](https://github.com/facebookresearch/sam3) fine-tuned on glass surfaces (Experiment 4). Weights (~5 GB) are downloaded automatically on first run from [HuggingFace](https://huggingface.co/jungsamu89/glass-sam3-finetuned).
+The project uses SAM3-style segmentation weights fine-tuned for glass surfaces. Model weights are downloaded on first run from HuggingFace when `HF_TOKEN` is configured.
 
 ## Requirements
 
-- Python 3.10–3.12 (tested with 3.10.11; Python 3.14 is not supported)
-- ~8 GB RAM (CPU inference)
-- ~6 GB disk for model weights (cached in `~/.cache/glassmeasure/`)
+- Python 3.10-3.12
+- About 8 GB RAM for CPU inference
+- About 6 GB disk space for cached model weights
+
+## Security
+
+Secrets are not committed. HuggingFace access is read from the `HF_TOKEN` environment variable, and model artifacts are ignored by Git.
